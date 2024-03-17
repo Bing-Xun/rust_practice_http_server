@@ -1,44 +1,61 @@
-use std::{io::{prelude::*, BufReader}, net::{TcpListener, TcpStream}, thread};
+use async_std::net::{TcpListener, TcpStream};
+use async_std::prelude::*;
+use async_std::task;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::io;
+use std::io::Error;
 
+// async fn handle_client(stream: async_std::net::TcpStream) {
+//     let mut stream = stream;
+//
+//
+//
+//
+//     let response = b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!";
+//     let _ = stream.write_all(response).await;
+// }
 
-fn main() {
-    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
-    // 创建一个原子整数，并初始化为 0
-    let atomic_int = Arc::new(AtomicI32::new(0));
+#[async_std::main]
+async fn main() -> std::io::Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    let listener = Arc::new(listener);
 
+    loop {
+        let (stream, client_addr) = listener.accept().await?;
+        let listener = Arc::clone(&listener);
+        // task::spawn(async move {
+        //     handle_client(stream).await;
+        // });
 
-    for stream in listener.incoming() {
-        let stream = stream.unwrap();
-        let atomic_int_clone = Arc::clone(&atomic_int);
-
-        thread::spawn(move || {
-            handle_connection(stream);
-
-            let atomic_int_inner = &atomic_int_clone;
-            atomic_int_inner.fetch_add(1, Ordering::SeqCst);
-
-            let value = atomic_int_inner.load(Ordering::SeqCst);
-            println!("Result of atomic operation: {}", value);
+        async_std::task::spawn(async move {
+            if let Err(err) = handle_connection(stream, client_addr).await {
+                eprintln!("Error handling connection: {}", err);
+            }
         });
     }
 }
 
-fn handle_connection(mut stream: TcpStream) {
-    let buf_reader = BufReader::new(&mut stream);
-    let http_request: Vec<_> = buf_reader
-        .lines()
-        .map(|result| result.unwrap())
-        .take_while(|line| !line.is_empty())
-        .collect();
+async fn handle_connection(mut stream: TcpStream, client_addr: std::net::SocketAddr) -> io::Result<()> {
+    // 处理连接逻辑
+    println!("Received connection from: {}", client_addr);
 
-    println!("請求：{:#?}", http_request);
+    // 读取数据
+    let mut buffer = vec![0; 1024];
+    let nbytes = match stream.read(&mut buffer).await {
+        Ok(n) => n,
+        Err(err) => {
+            eprintln!("Error reading from stream: {}", err);
+            return Err(err.into());
+        }
+    };
 
-    let response = "HTTP/1.1 200 OK\r\n\r\n";
+    // 将字节数据转换为字符串
+    let received_data = String::from_utf8_lossy(&buffer[..nbytes]);
+    println!("Received data from {}: {}", client_addr, received_data);
 
-    stream.write_all(response.as_bytes()).unwrap();
+    // 在这里你可以进一步解析数据，例如将其转换为结构体或其他类型的参数
+    let response = b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!";
+    let _ = stream.write_all(response).await;
 
-    // shared_number.fetch_add(1, Ordering::SeqCst);
-    // let value = shared_number.load(Ordering::SeqCst);
+    Ok(())
 }
